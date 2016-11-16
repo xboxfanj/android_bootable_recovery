@@ -37,25 +37,46 @@
 #include "verifier.h"
 #endif
 
+#define SYSFS_USB_ENABLE_NODE "/sys/class/android_usb/android0/enable"
+#define CONFIGFS_USB_ENABLE_NODE "/config/usb_gadget/g1/UDC"
 static RecoveryUI* ui = NULL;
 
 void
 set_usb_driver(bool enabled) {
-    int fd = open("/sys/class/android_usb/android0/enable", O_WRONLY);
+    int fd = open(SYSFS_USB_ENABLE_NODE, O_WRONLY);
+    int configfs_enabled = 0;
+    char controller_name[PROPERTY_VALUE_MAX + 1] = {0};
+    property_get("sys.usb.controller", controller_name, "none");
     if (fd < 0) {
 /* These error messages show when built in older Android branches (e.g. Gingerbread)
    It's not a critical error so we're disabling the error messages.
         ui->Print("failed to open driver control: %s\n", strerror(errno));
 */
-		printf("failed to open driver control: %s\n", strerror(errno));
-        return;
+		printf("failed to open sysfs usb node( %s).  Trying configfs\n",
+		strerror(errno));
+
+        fd = open(CONFIGFS_USB_ENABLE_NODE, O_WRONLY);
+        if (fd < 0) {
+                printf("Failed to open configfs node (%s)\n",
+                                strerror(errno));
+                return;
+        }
+        configfs_enabled = 1;
     }
 
-    if (TEMP_FAILURE_RETRY(write(fd, enabled ? "1" : "0", 1)) == -1) {
-/*
-        ui->Print("failed to set driver control: %s\n", strerror(errno));
-*/
-		printf("failed to set driver control: %s\n", strerror(errno));
+    if (!configfs_enabled) {
+             if (TEMP_FAILURE_RETRY(write(fd, enabled ? "1" : "0", 1)) == -1) {
+                    printf("failed to set driver control: %s\n",
+                                 strerror(errno));
+             }
+    } else {
+             if (TEMP_FAILURE_RETRY(write(fd,
+                                           enabled ? controller_name : "none",
+                                           PROPERTY_VALUE_MAX))) {
+                  printf("failed to set driver control: %s\n",
+                                 strerror(errno));
+           }
+
     }
     if (close(fd) < 0) {
 /*
